@@ -1,0 +1,13 @@
+Ayman Smart IPTV iPhone PWA v1.1.0
+
+- Player fullscreen/safe-area refinements
+- Smarter controls auto-hide
+- Live channel zapping and swipe gestures
+- VOD/Series swipe seek + double-tap +/-10 seconds
+- Faster startup and HLS->TS fallback timeout
+- Smart reconnect and network recovery
+- Last section/category persistence + Play Last
+- Favorites and Continue Watching improvements
+- Mobile grid/UI refinements
+- Improved API timeout/errors
+- Cache upgraded to v1.1.0

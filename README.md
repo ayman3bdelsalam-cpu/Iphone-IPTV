@@ -1,52 +1,45 @@
-# Ayman Smart IPTV — iPhone PWA v1.0.0
+# Ayman Smart IPTV — iPhone PWA v1.1.0
 
-Free iPhone/iPad web app version of Ayman Smart IPTV. No Apple Developer account, App Store, IPA signing, or 7-day refresh is required.
+A free installable IPTV web app for iPhone/iPad. No Apple Developer account and no 7-day signing renewal are required.
 
-## Features
+## v1.1.0 highlights
 
-- Xtream Codes login
-- Live TV, Movies, Series and episodes
-- Categories, global search, favorites, Continue Watching
-- Native iPhone video playback (HLS first, TS fallback for Live)
-- FIT / FILL / ZOOM with saved preference
-- Auto-hidden player controls
-- Screen Wake Lock when supported by iOS
-- Picture-in-Picture when supported by the device/browser
-- Audio-track and subtitle selectors when exposed by Safari
-- Smart reconnect: 1s → 2s → 4s
-- 5-minute API/list cache, 250–300ms search debounce
-- Resume saved every 45 seconds and when leaving the player
-- Login can be remembered locally using Web Crypto (AES-GCM)
-- Offline app shell via Service Worker
-- Same Ayman Smart IPTV visual identity as the LG/Android build
+- Better iPhone fullscreen layout and safe-area handling
+- Best-effort landscape lock where iOS/browser allows it, plus a rotate hint where it does not
+- Smarter auto-hiding player controls
+- FIT / FILL / ZOOM display modes with saved preference
+- Screen Wake Lock while media is playing where supported
+- Picture-in-Picture support where iOS exposes it
+- Live channel zapping with Previous / Next controls
+- Live swipe gestures: swipe horizontally to change channel
+- VOD/Series gestures: swipe horizontally to seek; double-tap left/right for -10/+10 seconds
+- Faster live startup with HLS -> TS fallback and a startup timeout
+- Smart reconnect (1s -> 2s -> 4s) and automatic recovery after network returns
+- Saved last section/category and a Play Last shortcut
+- Improved Favorites and Continue Watching, including remove/clear controls
+- 10-minute API cache and 250 ms search debounce
+- Better image loading and mobile layout
+- Improved error messages and retry UI
+- Encrypted remembered credentials using Web Crypto when available
 
-## Publish free with GitHub Pages
+## Important iPhone limitation
 
-1. Create a new repository, e.g. `AymanIPTV-iPhone`.
-2. Upload **the contents of this folder** to the repository root (do not upload the ZIP itself).
-3. Go to **Settings → Pages**.
-4. Under **Build and deployment → Source**, choose **GitHub Actions**.
-5. Open **Actions → Deploy iPhone PWA**. It should deploy automatically after the upload; if not, choose **Run workflow**.
-6. When the workflow is green, open the deployment URL shown by GitHub.
+A PWA cannot directly change the iPhone's system brightness or hardware volume. Those remain controlled by iOS / Control Center. v1.1.0 therefore uses gestures for seeking and live channel changes instead of pretending to control system brightness/volume.
+
+## Updating an existing GitHub Pages install
+
+Upload/replace these files in the same GitHub repository:
+- `index.html`
+- `app.js`
+- `styles.css`
+- `manifest.webmanifest`
+- `sw.js`
+- `README.md`
+
+Keep your existing `cloudflare-worker/` and `icons/` folders. The existing Cloudflare Worker URL and `ALLOWED_HOST` variable do not need to change.
+
+After GitHub Pages updates, fully close the Home Screen app and reopen it. If the old version is still cached, open the site once in Safari, refresh, then reopen the Home Screen app.
 
 ## Install on iPhone
 
-Open the GitHub Pages URL in **Safari** → Share → **Add to Home Screen** → enable **Open as Web App** if shown → Add.
-
-## If login says Failed to fetch / CORS
-
-Many Xtream servers allow TVs/apps but block browser JavaScript API requests. The PWA includes a small optional Cloudflare Worker proxy for **API JSON only**. Video is still streamed directly from the IPTV server.
-
-1. Create a free Cloudflare Worker.
-2. Paste `cloudflare-worker/worker.js` into it.
-3. Add a Worker variable named `ALLOWED_HOST` with only your IPTV server hostname, for example `example.com` (no `https://`, no port).
-4. Deploy the Worker.
-5. In Ayman IPTV → Connection settings, paste the Worker URL, for example `https://your-worker.workers.dev`.
-
-The Worker intentionally proxies only `/player_api.php` and only the hostname you allow, so it is not an open public proxy.
-
-## iPhone limitations
-
-Apple does not give PWAs the same orientation control as native App Store apps on every iOS version. The player tries to request landscape, shows a rotate hint when needed, and fills the available standalone app viewport. Full native video fullscreen/PiP behavior ultimately follows the iOS version and device settings.
-
-A raw `.ts` live stream may not be playable by Safari on every server. The app tries `.m3u8` first and then `.ts`. For best iPhone compatibility, the IPTV provider should expose HLS (`m3u8`).
+Open the GitHub Pages URL in Safari, tap Share, choose **Add to Home Screen**, then open Ayman IPTV from the new icon.

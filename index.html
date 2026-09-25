@@ -37,6 +37,7 @@
           <label>Optional API proxy URL</label>
           <input id="proxyInput" type="url" inputmode="url" placeholder="https://your-worker.workers.dev">
           <small>Only needed if the IPTV server blocks browser API requests (CORS). Video streams are not proxied.</small>
+          <small class="version-note">Ayman Smart IPTV · v1.1.0</small>
         </details>
         <div id="loginError" class="error hidden"></div>
       </div>
@@ -66,8 +67,11 @@
           <div id="playerTitle" class="player-title"></div>
           <button id="pipBtn" class="round-btn" aria-label="Picture in Picture">▣</button>
         </div>
+        <div id="gestureOverlay" class="gesture-overlay hidden"></div>
         <div class="center-controls">
+          <button id="prevBtn" class="side-play-btn hidden" aria-label="Previous channel">‹‹</button>
           <button id="playPauseBtn" class="play-btn">❚❚</button>
+          <button id="nextBtn" class="side-play-btn hidden" aria-label="Next channel">››</button>
         </div>
         <div class="player-bottom glass-dark">
           <div id="seekWrap" class="seek-wrap hidden">
@@ -82,6 +86,7 @@
             <button id="retryBtn" class="pill-btn hidden">RETRY</button>
           </div>
           <div id="playerStatus" class="player-status">Loading…</div>
+          <div id="playerHint" class="player-hint hidden"></div>
         </div>
       </div>
     </section>

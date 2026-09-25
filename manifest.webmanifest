@@ -1,10 +1,12 @@
 {
+  "id": "./",
   "name": "Ayman Smart IPTV",
   "short_name": "Ayman IPTV",
   "description": "Ayman Smart IPTV for iPhone and iPad",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "fullscreen"],
   "orientation": "any",
   "background_color": "#060d1a",
   "theme_color": "#060d1a",
