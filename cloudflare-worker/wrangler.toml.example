@@ -1,0 +1,6 @@
+name = "ayman-iptv-api-proxy"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+ALLOWED_HOST = "YOUR_IPTV_SERVER_HOSTNAME"
