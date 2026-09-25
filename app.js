@@ -2,7 +2,11 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const CACHE_TTL = 10 * 60 * 1000;
+const CACHE_TTL = 15 * 60 * 1000;
+const API_TIMEOUT_MS = 30000;
+const LIVE_START_GRACE_MS = 20000;
+const VOD_START_GRACE_MS = 35000;
+const STALL_GRACE_MS = 22000;
 const CONTROL_HIDE_MS = 2600;
 const state = {
   server:'', user:'', pass:'', proxy:'',
@@ -14,7 +18,8 @@ const state = {
   scale:localStorage.getItem('ayman_scale') || 'zoom',
   lastView:loadJSON('ayman_last_view',{kind:'home'}),
   lastPlayed:loadJSON('ayman_last_played',null),
-  player:null, playerTarget:null, sourceIndex:0, retryCount:0, retryTimer:null, startupTimer:null,
+  player:null, playerTarget:null, sourceIndex:0, retryCount:0, retryTimer:null, startupTimer:null, stallTimer:null,
+  lastProgressAt:0, lastProgressTime:0, sourcePrefs:loadJSON('ayman_source_prefs',{}),
   wakeLock:null, controlsTimer:null, progressTimer:null,
   playerQueue:null, gesture:null, gestureSeek:null, lastTapAt:0, lastTapX:0,
   isScrubbing:false,
@@ -28,7 +33,7 @@ function fmtTime(sec){if(!Number.isFinite(sec)||sec<0)return'0:00';const h=Math.
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(t._x);t._x=setTimeout(()=>t.classList.add('hidden'),2200)}
 function setView(id){['loginView','mainView','playerView'].forEach(v=>$(v).classList.toggle('active',v===id));document.body.classList.toggle('player-active',id==='playerView')}
 function saveLastView(v){state.lastView=v;saveJSON('ayman_last_view',v)}
-function preconnectServer(){try{const origin=new URL(state.server).origin;let l=document.querySelector('link[data-ayman-preconnect]');if(!l){l=document.createElement('link');l.rel='preconnect';l.crossOrigin='anonymous';l.dataset.aymanPreconnect='1';document.head.appendChild(l)}l.href=origin}catch{}}
+function preconnectServer(){try{const origin=new URL(state.server).origin;let l=document.querySelector('link[data-ayman-preconnect]');if(!l){l=document.createElement('link');l.rel='preconnect';l.dataset.aymanPreconnect='1';document.head.appendChild(l)}l.removeAttribute('crossorigin');l.href=origin;let d=document.querySelector('link[data-ayman-dns]');if(!d){d=document.createElement('link');d.rel='dns-prefetch';d.dataset.aymanDns='1';document.head.appendChild(d)}d.href=origin}catch{}}
 
 async function credKey(){
   if(!crypto?.subtle) return null;
@@ -69,13 +74,20 @@ function apiUrl(action, extra={}){
   return state.proxy.replace(/\/+$/,'')+'/?url='+encodeURIComponent(direct);
 }
 async function api(action,extra={}){
-  const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),15000);
-  try{
-    const res=await fetch(apiUrl(action,extra),{cache:'no-store',mode:'cors',signal:controller.signal});
-    if(!res.ok)throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  }finally{clearTimeout(timeout)}
+  let lastErr=null;
+  for(let attempt=0;attempt<2;attempt++){
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),API_TIMEOUT_MS);
+    try{
+      const res=await fetch(apiUrl(action,extra),{cache:'no-store',mode:'cors',signal:controller.signal});
+      if(!res.ok)throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }catch(e){
+      lastErr=e;
+      if(attempt===0 && navigator.onLine) await new Promise(r=>setTimeout(r,700));
+    }finally{clearTimeout(timeout)}
+  }
+  throw lastErr||new Error('Request failed');
 }
 
 async function login(server,user,pass,proxy,remember){
@@ -164,9 +176,24 @@ async function openSeries(series){
   }catch(e){renderApiError(e,()=>openSeries(series))}
 }
 
-function liveUrls(it){const id=itemId('LIVE',it),base=`${state.server}/live/${encodeURIComponent(state.user)}/${encodeURIComponent(state.pass)}/${id}`;return[`${base}.m3u8`,`${base}.ts`]}
-function vodUrls(it){const id=itemId('VOD',it),ext=it.container_extension||'mp4';return[`${state.server}/movie/${encodeURIComponent(state.user)}/${encodeURIComponent(state.pass)}/${id}.${ext}`]}
-function epUrls(ep){const ext=ep.container_extension||'mp4';return[`${state.server}/series/${encodeURIComponent(state.user)}/${encodeURIComponent(state.pass)}/${ep.id}.${ext}`]}
+function uniq(arr){return [...new Set(arr.filter(Boolean))]}
+function liveUrls(it){
+  const id=itemId('LIVE',it),base=`${state.server}/live/${encodeURIComponent(state.user)}/${encodeURIComponent(state.pass)}/${id}`;
+  const pref=state.sourcePrefs.LIVE||'m3u8';
+  return pref==='ts'?[`${base}.ts`,`${base}.m3u8`]:[`${base}.m3u8`,`${base}.ts`];
+}
+function vodUrls(it){
+  const id=itemId('VOD',it),ext=(it.container_extension||'mp4').toLowerCase(),base=`${state.server}/movie/${encodeURIComponent(state.user)}/${encodeURIComponent(state.pass)}/${id}`;
+  const candidates=uniq([`${base}.${ext}`,`${base}.mp4`,`${base}.m3u8`]);
+  const pref=state.sourcePrefs.VOD;if(pref){const i=candidates.findIndex(x=>x.endsWith('.'+pref));if(i>0)candidates.unshift(candidates.splice(i,1)[0])}
+  return candidates;
+}
+function epUrls(ep){
+  const ext=(ep.container_extension||'mp4').toLowerCase(),base=`${state.server}/series/${encodeURIComponent(state.user)}/${encodeURIComponent(state.pass)}/${ep.id}`;
+  const candidates=uniq([`${base}.${ext}`,`${base}.mp4`,`${base}.m3u8`]);
+  const pref=state.sourcePrefs.SERIES;if(pref){const i=candidates.findIndex(x=>x.endsWith('.'+pref));if(i>0)candidates.unshift(candidates.splice(i,1)[0])}
+  return candidates;
+}
 function buildTarget(type,it){const urls=type==='LIVE'?liveUrls(it):vodUrls(it);const key=`${type}:${itemId(type,it)}`;return{type,title:itemName(it),icon:itemPoster(it),itemId:itemId(type,it),ext:it.container_extension||'mp4',urls,seekable:type!=='LIVE',resumeKey:key,start:Number(state.resume[key]?.time||0)}}
 function playItem(type,it){
   if(type==='LIVE'){const usable=state.currentType==='LIVE'&&state.currentItems.some(x=>itemId(type,x)===itemId(type,it));const items=usable?state.currentItems.slice():[it];const idx=items.findIndex(x=>itemId(type,x)===itemId(type,it));state.playerQueue={type:'LIVE',items,index:Math.max(0,idx)}}else state.playerQueue=null;
@@ -183,31 +210,55 @@ async function startPlayer(target){
   try{if(screen.orientation?.lock)await screen.orientation.lock('landscape')}catch{}
   updateRotateHint();await acquireWakeLock();attachPlayerEvents();loadSource(0,target.start||0);
 }
+function clearPlayerTimers(){clearTimeout(state.startupTimer);clearTimeout(state.stallTimer);state.startupTimer=null;state.stallTimer=null}
+function bufferedAhead(v){try{if(!v.buffered||!v.buffered.length)return 0;const now=v.currentTime||0;for(let i=0;i<v.buffered.length;i++){if(v.buffered.start(i)<=now&&v.buffered.end(i)>=now)return Math.max(0,v.buffered.end(i)-now)}}catch{}return 0}
+function rememberWorkingSource(){
+  const t=state.playerTarget;if(!t)return;const url=t.urls[state.sourceIndex]||'';const m=url.match(/\.([a-z0-9]+)(?:\?|$)/i);if(!m)return;state.sourcePrefs[t.type]=m[1].toLowerCase();saveJSON('ayman_source_prefs',state.sourcePrefs);
+}
+function armStallWatch(){
+  clearTimeout(state.stallTimer);const t=state.playerTarget,v=$('video');if(!t)return;const mark=state.lastProgressTime;state.stallTimer=setTimeout(()=>{
+    if(state.playerTarget!==t||v.paused||v.ended)return;
+    const advanced=Math.abs((v.currentTime||0)-mark)>0.4;
+    if(advanced||bufferedAhead(v)>1.5)return;
+    $('playerStatus').textContent='Stream stalled — recovering…';
+    if(state.sourceIndex+1<t.urls.length) loadSource(state.sourceIndex+1,t.seekable?v.currentTime:0); else handlePlaybackError(true);
+  },STALL_GRACE_MS);
+}
 function loadSource(index,start=0){
   const t=state.playerTarget,v=$('video');if(!t||index>=t.urls.length){fatalPlayerError('Stream failed');return}
-  state.sourceIndex=index;clearTimeout(state.startupTimer);$('retryBtn').classList.add('hidden');$('playerStatus').textContent=index?'Trying fallback stream…':'Loading…';v.pause();v.removeAttribute('src');v.src=t.urls[index];
+  state.sourceIndex=index;clearPlayerTimers();$('retryBtn').classList.add('hidden');$('playerHint').classList.add('hidden');$('playerStatus').textContent=index?'Trying compatible stream…':'Loading…';
+  try{v.pause();v.removeAttribute('src');v.load()}catch{}
+  v.preload='auto';v.src=t.urls[index];try{v.load()}catch{}
+  state.lastProgressAt=Date.now();state.lastProgressTime=0;
   if(start>0){v.addEventListener('loadedmetadata',function s(){v.removeEventListener('loadedmetadata',s);try{v.currentTime=Math.min(start,Math.max(0,(v.duration||start)-5))}catch{}},{once:true})}
-  const timeout=t.type==='LIVE'?7000:12000;state.startupTimer=setTimeout(()=>{if(state.playerTarget!==t||!v.paused||v.readyState>=3)return;if(state.sourceIndex+1<t.urls.length){$('playerStatus').textContent='Switching stream format…';loadSource(state.sourceIndex+1,t.seekable?v.currentTime:0)}else handlePlaybackError()},timeout);
-  v.play().catch(()=>{$('playerStatus').textContent='Tap play to start';showControls(true)});
+  const timeout=t.type==='LIVE'?LIVE_START_GRACE_MS:VOD_START_GRACE_MS;
+  state.startupTimer=setTimeout(()=>{
+    if(state.playerTarget!==t||v.readyState>=3||bufferedAhead(v)>1)return;
+    if(state.sourceIndex+1<t.urls.length){$('playerStatus').textContent='Trying another stream format…';loadSource(state.sourceIndex+1,t.seekable?v.currentTime:0)}else handlePlaybackError(true);
+  },timeout);
+  const playPromise=v.play();if(playPromise?.catch)playPromise.catch(()=>{$('playerStatus').textContent='Tap play to start';showControls(true)});
 }
 function attachPlayerEvents(){
   const v=$('video');if(v._aymanBound)return;v._aymanBound=true;
-  v.addEventListener('playing',()=>{clearTimeout(state.startupTimer);$('playerStatus').textContent='';$('playPauseBtn').textContent='❚❚';state.retryCount=0;startProgressSaver();showControls()});
+  v.addEventListener('playing',()=>{clearPlayerTimers();rememberWorkingSource();$('playerStatus').textContent='';$('playPauseBtn').textContent='❚❚';state.retryCount=0;state.lastProgressAt=Date.now();state.lastProgressTime=v.currentTime||0;startProgressSaver();showControls()});
+  v.addEventListener('canplay',()=>{if(bufferedAhead(v)>0.5&&$('playerStatus').textContent==='Buffering…')$('playerStatus').textContent=''});
   v.addEventListener('pause',()=>{$('playPauseBtn').textContent='▶';persistResume();showControls(true)});
-  v.addEventListener('waiting',()=>{$('playerStatus').textContent='Buffering…'});
-  v.addEventListener('timeupdate',()=>{if(!state.playerTarget?.seekable||state.isScrubbing)return;const d=v.duration||0;if(d>0){$('seekBar').value=String(Math.floor((v.currentTime/d)*1000));$('currentTime').textContent=fmtTime(v.currentTime);$('durationTime').textContent=fmtTime(d)}});
+  v.addEventListener('waiting',()=>{$('playerStatus').textContent='Buffering…';state.lastProgressTime=v.currentTime||0;armStallWatch()});
+  v.addEventListener('stalled',()=>{$('playerStatus').textContent='Waiting for stream…';state.lastProgressTime=v.currentTime||0;armStallWatch()});
+  v.addEventListener('progress',()=>{if(bufferedAhead(v)>2)clearTimeout(state.stallTimer)});
+  v.addEventListener('timeupdate',()=>{state.lastProgressAt=Date.now();state.lastProgressTime=v.currentTime||0;clearTimeout(state.stallTimer);if(!state.playerTarget?.seekable||state.isScrubbing)return;const d=v.duration||0;if(d>0){$('seekBar').value=String(Math.floor((v.currentTime/d)*1000));$('currentTime').textContent=fmtTime(v.currentTime);$('durationTime').textContent=fmtTime(d)}});
   v.addEventListener('ended',()=>{clearResume();closePlayer()});
-  v.addEventListener('error',()=>handlePlaybackError());
+  v.addEventListener('error',()=>handlePlaybackError(false));
   v.addEventListener('webkitpresentationmodechanged',updatePipButton);
   v.addEventListener('enterpictureinpicture',updatePipButton);v.addEventListener('leavepictureinpicture',updatePipButton);
   document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'&&state.playerTarget){await acquireWakeLock();if(v.paused&&!v.ended&&document.pictureInPictureElement!==v)v.play().catch(()=>{})}});
   attachGestures();
 }
-function handlePlaybackError(){
-  const t=state.playerTarget;if(!t)return;clearTimeout(state.startupTimer);
+function handlePlaybackError(fromStall=false){
+  const t=state.playerTarget;if(!t)return;clearPlayerTimers();
   if(!navigator.onLine){$('playerStatus').textContent='Offline — waiting for network';showControls(true);return}
   if(state.sourceIndex+1<t.urls.length){loadSource(state.sourceIndex+1,t.seekable?$('video').currentTime:0);return}
-  if(state.retryCount<3){const delay=[1000,2000,4000][state.retryCount++];$('playerStatus').textContent=`Reconnecting in ${delay/1000}s…`;clearTimeout(state.retryTimer);state.retryTimer=setTimeout(()=>loadSource(state.sourceIndex,t.seekable?$('video').currentTime:0),delay);return}
+  if(state.retryCount<4){const delay=[1200,2500,5000,8000][state.retryCount++];$('playerStatus').textContent=`${fromStall?'Recovering':'Reconnecting'} in ${Math.round(delay/100)/10}s…`;clearTimeout(state.retryTimer);state.retryTimer=setTimeout(()=>loadSource(0,t.seekable?$('video').currentTime:0),delay);return}
   fatalPlayerError('Unable to play this stream');
 }
 function fatalPlayerError(msg){$('playerStatus').textContent=msg;$('retryBtn').classList.remove('hidden');$('playerHint').textContent=navigator.onLine?'Try Retry or another channel/source.':'Check your internet connection.';$('playerHint').classList.remove('hidden');showControls(true)}
@@ -220,7 +271,7 @@ function persistResume(){const t=state.playerTarget,v=$('video');if(!t?.seekable
 function clearResume(){const t=state.playerTarget;if(t?.resumeKey&&state.resume[t.resumeKey]){delete state.resume[t.resumeKey];saveJSON('ayman_resume',state.resume)}}
 async function acquireWakeLock(){try{if('wakeLock'in navigator){if(state.wakeLock&&!state.wakeLock.released)return;state.wakeLock=await navigator.wakeLock.request('screen')}}catch{}}
 async function releaseWakeLock(){try{await state.wakeLock?.release()}catch{}state.wakeLock=null}
-async function closePlayer(){persistResume();clearInterval(state.progressTimer);clearTimeout(state.retryTimer);clearTimeout(state.startupTimer);const v=$('video');v.pause();v.removeAttribute('src');v.load();await releaseWakeLock();try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}try{screen.orientation?.unlock?.()}catch{}state.playerTarget=null;state.playerQueue=null;state.gesture=null;state.gestureSeek=null;setView('mainView');renderLastViewAfterPlayer()}
+async function closePlayer(){persistResume();clearInterval(state.progressTimer);clearTimeout(state.retryTimer);clearPlayerTimers();const v=$('video');v.pause();v.removeAttribute('src');v.load();await releaseWakeLock();try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}try{screen.orientation?.unlock?.()}catch{}state.playerTarget=null;state.playerQueue=null;state.gesture=null;state.gestureSeek=null;setView('mainView');renderLastViewAfterPlayer()}
 function renderLastViewAfterPlayer(){const v=state.lastView;if(v?.kind==='content'&&v.type)return openContent(v.type,false,v.category||'0');if(v?.kind==='favorites')return renderFavorites();if(v?.kind==='continue')return renderContinue();if(v?.kind==='search')return renderSearch();renderHome()}
 function updateRotateHint(){const portrait=matchMedia('(orientation: portrait)').matches;$('rotateHint').classList.toggle('hidden',!portrait||!state.playerTarget)}
 addEventListener('orientationchange',updateRotateHint);addEventListener('resize',updateRotateHint);

@@ -1,45 +1,25 @@
-# Ayman Smart IPTV — iPhone PWA v1.1.0
+# Ayman Smart IPTV — iPhone PWA v1.2.0
 
-A free installable IPTV web app for iPhone/iPad. No Apple Developer account and no 7-day signing renewal are required.
+This release focuses on playback reliability and slow/buffering IPTV servers on iPhone.
 
-## v1.1.0 highlights
+## v1.2.0 streaming changes
 
-- Better iPhone fullscreen layout and safe-area handling
-- Best-effort landscape lock where iOS/browser allows it, plus a rotate hint where it does not
-- Smarter auto-hiding player controls
-- FIT / FILL / ZOOM display modes with saved preference
-- Screen Wake Lock while media is playing where supported
-- Picture-in-Picture support where iOS exposes it
-- Live channel zapping with Previous / Next controls
-- Live swipe gestures: swipe horizontally to change channel
-- VOD/Series gestures: swipe horizontally to seek; double-tap left/right for -10/+10 seconds
-- Faster live startup with HLS -> TS fallback and a startup timeout
-- Smart reconnect (1s -> 2s -> 4s) and automatic recovery after network returns
-- Saved last section/category and a Play Last shortcut
-- Improved Favorites and Continue Watching, including remove/clear controls
-- 10-minute API cache and 250 ms search debounce
-- Better image loading and mobile layout
-- Improved error messages and retry UI
-- Encrypted remembered credentials using Web Crypto when available
+- API timeout raised from 15s to 30s, with one automatic retry before showing an error.
+- Longer startup grace: 20s for Live and 35s for Movies/Series, avoiding premature stream resets on slower servers.
+- Stall watchdog: normal buffering is allowed to recover; the player only switches/reconnects after a sustained stall.
+- Remembers the last working stream format for Live / Movies / Series.
+- Live prefers native HLS (.m3u8) on iPhone, with TS as compatibility fallback.
+- Movies/Series try the server-provided container first, then MP4 and HLS compatibility URLs when available. This improves compatibility but cannot transcode unsupported codecs.
+- Smarter reconnect sequence (1.2s, 2.5s, 5s, 8s) and restarts from the best source instead of hammering one failed URL.
+- Better preconnect/DNS hints for the IPTV origin.
+- App-shell cache bumped to v1.2.0 so an installed Home Screen PWA receives the new player.
 
 ## Important iPhone limitation
 
-A PWA cannot directly change the iPhone's system brightness or hardware volume. Those remain controlled by iOS / Control Center. v1.1.0 therefore uses gestures for seeking and live channel changes instead of pretending to control system brightness/volume.
+A PWA uses Apple's native media stack. If a provider only supplies a codec/container iPhone does not decode (for example some MKV/codec combinations), the app cannot transcode it locally. The v1.2 player tries compatible alternate URLs when the IPTV server exposes them. Persistent buffering on the same channel/movie after this update normally points to the IPTV server/route itself rather than the UI.
 
-## Updating an existing GitHub Pages install
+## Update an existing GitHub Pages install
 
-Upload/replace these files in the same GitHub repository:
-- `index.html`
-- `app.js`
-- `styles.css`
-- `manifest.webmanifest`
-- `sw.js`
-- `README.md`
+Replace the old root files with this release, commit, wait for GitHub Pages to deploy, then open the GitHub Pages URL in Safari once and refresh it. Close the Home Screen app completely and reopen it. The service worker uses a new cache name, so v1.2.0 replaces the old shell automatically after activation.
 
-Keep your existing `cloudflare-worker/` and `icons/` folders. The existing Cloudflare Worker URL and `ALLOWED_HOST` variable do not need to change.
-
-After GitHub Pages updates, fully close the Home Screen app and reopen it. If the old version is still cached, open the site once in Safari, refresh, then reopen the Home Screen app.
-
-## Install on iPhone
-
-Open the GitHub Pages URL in Safari, tap Share, choose **Add to Home Screen**, then open Ayman IPTV from the new icon.
+Your existing Cloudflare API Worker and ALLOWED_HOST setting do not need to change.

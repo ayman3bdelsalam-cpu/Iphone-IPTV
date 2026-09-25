@@ -1,0 +1,18 @@
+Ayman Smart IPTV iPhone PWA v1.2.0
+
+STREAMING / BUFFERING
+- API timeout 30 seconds + one automatic retry.
+- Live startup grace 20 seconds.
+- VOD/Series startup grace 35 seconds.
+- Sustained-stall watchdog (22 seconds) instead of aggressive resets.
+- Remember last working stream extension per media type.
+- Live HLS/TS compatibility ordering.
+- Movies/Series original container + MP4 + HLS fallback candidates.
+- Smarter reconnect backoff: 1.2 / 2.5 / 5 / 8 seconds.
+- Better origin preconnect and DNS prefetch.
+- Service worker cache bumped to v1.2.0.
+
+NO CHANGE REQUIRED
+- Existing Cloudflare API Worker URL.
+- ALLOWED_HOST.
+- Existing saved credentials, favorites, resume history, and display mode.
